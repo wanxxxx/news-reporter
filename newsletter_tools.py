@@ -331,9 +331,20 @@ def fetch_outdoor_articles(start_date: date, end_date: date, max_workers: int = 
         completed = 0
         for future in as_completed(futures):
             try:
-                site_articles = future.result()
+                site_result = future.result()
                 current_site_url = site_url_map.get(id(future), "未知网站")
-                articles.extend(site_articles)
+                
+                # 处理不同类型的返回值
+                if isinstance(site_result, dict):
+                    # _fetch_from_html 返回字典
+                    site_articles = site_result.get('articles', [])
+                    articles.extend(site_articles)
+                elif isinstance(site_result, list):
+                    # _fetch_from_rss 返回列表
+                    articles.extend(site_result)
+                else:
+                    logger.warning(f"⚠️ 未知返回类型: {type(site_result)}")
+                
                 completed += 1
                 logger.info(f"✅ 完成 {completed}/{len(TARGET_SITES)} 个网站：{current_site_url}")
             except Exception as e:
@@ -343,6 +354,36 @@ def fetch_outdoor_articles(start_date: date, end_date: date, max_workers: int = 
     
     logger.info(f"🎉 所有网站抓取完成，共获取 {len(articles)} 篇文章")
     return articles
+
+
+def _clean_rss_content(raw_html: str) -> str:
+    # 1. 处理转义字符：将 \\n 替换为换行，将 \\\" 替换为引号
+    content = raw_html.replace('\\n', '\n').replace('\\"', '"')
+    
+    # 2. 使用 BeautifulSoup 解析 HTML
+    soup = BeautifulSoup(content, 'html.parser')
+    
+    # 3. 移除不相关的标签（如图片说明、脚本、样式）
+    for extra in soup(['figure', 'script', 'style', 'img']):
+        extra.decompose()
+        
+    # 4. 获取文本，并处理掉 RSS 中常见的重复链接（比如 "The post...appeared first on..."）
+    lines = []
+    for p in soup.find_all(['p', 'h1', 'h2', 'h3']):
+        text = p.get_text().strip()
+        # 过滤掉 RSS 自动生成的末尾推广语
+        if "The post" in text and "appeared first on" in text:
+            continue
+        if text:
+            lines.append(text)
+    
+    # 5. 去重（RSS 有时会重复推送正文片段）
+    unique_lines = []
+    for line in lines:
+        if line not in unique_lines:
+            unique_lines.append(line)
+            
+    return "\n\n".join(unique_lines)
 
 
 def _fetch_from_rss(rss_url: str, site_url: str, start_date: date, end_date: date) -> List[Dict]:
@@ -403,8 +444,8 @@ def _fetch_from_rss(rss_url: str, site_url: str, start_date: date, end_date: dat
         if article_data:
             for data in article_data:
                 try:
-                    # 直接使用RSS中提取的内容
-                    content_text = data['raw_content'].strip()
+                    # 清理RSS内容，移除HTML标签和元数据
+                    content_text = _clean_rss_content(data['raw_content'])
                     
                     if content_text and len(content_text) > 50:  # 确保有足够的内容
                         articles.append({
