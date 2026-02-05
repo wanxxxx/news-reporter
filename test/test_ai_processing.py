@@ -1,4 +1,8 @@
 import os
+import sys
+
+# 添加父目录到Python路径，以便导入newsletter_tools
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 1. 强制移除代理环境变量 (在 import requests/openai 之前执行)
 os.environ.pop(
@@ -35,7 +39,7 @@ def main():
 
     print("\n" + "-" * 80)
     print("读取测试数据...")
-    test_file = 'newsletter_tools_output_2026-02-01_to_2026-02-01.json'
+    test_file = os.path.join('test', 'data', 'test_ai_processing_data.json')
 
     with open(test_file, 'r', encoding='utf-8') as f:
         articles = json.load(f)

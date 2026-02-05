@@ -1,4 +1,9 @@
 import os
+import sys
+
+# 添加父目录到Python路径，以便导入newsletter_tools
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
 from dotenv import load_dotenv
 from newsletter_tools import publish_feishu_report
@@ -39,7 +44,7 @@ def main():
     # 读取 Markdown 文件
     print("\n" + "-" * 80)
     print("读取 Markdown 文件...")
-    markdown_file = 'newsletter_ai_output.md'
+    markdown_file = os.path.join('test', 'data', 'test_feishu_publish_data.md')
     
     try:
         with open(markdown_file, 'r', encoding='utf-8') as f:
