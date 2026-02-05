@@ -63,7 +63,7 @@ RSS_FEEDS = {
 }
 
 
-def fetch_weekly_outdoor_articles(start_date: date, end_date: date) -> List[Dict]:
+def fetch_outdoor_articles(start_date: date, end_date: date) -> List[Dict]:
     articles = []
     
     for site_url in TARGET_SITES:
@@ -536,9 +536,24 @@ def publish_feishu_report(report_title, markdown_content, chat_id):
     
     # 获取转换后的 blocks
     blocks = convert_resp.data.blocks
+    first_level_block_ids = convert_resp.data.first_level_block_ids or []
+    
     if not blocks:
         print("⚠️ 转换后的内容为空")
         return doc_url
+    
+    # 使用 first_level_block_ids 重新排序 blocks
+    if first_level_block_ids:
+        block_map = {b.block_id: b for b in blocks}
+        ordered_blocks = []
+        for block_id in first_level_block_ids:
+            if block_id in block_map:
+                ordered_blocks.append(block_map[block_id])
+        # 添加不在 first_level_block_ids 中的 blocks
+        for block in blocks:
+            if block.block_id not in first_level_block_ids:
+                ordered_blocks.append(block)
+        blocks = ordered_blocks
     
     print(f"✅ Markdown 转换成功，共 {len(blocks)} 个 blocks")
     
