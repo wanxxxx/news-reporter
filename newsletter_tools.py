@@ -1048,16 +1048,6 @@ def _generate_markdown(articles: List[Dict]) -> str:
             markdown_lines.append(f'- {site}\n')
         markdown_lines.append('\n---\n')
     
-    # 添加文章标题和链接汇总（折叠）
-    markdown_lines.append('\n## 文章列表\n')
-    markdown_lines.append('<details>\n')
-    markdown_lines.append('<summary>点击展开文章列表</summary>\n\n')
-    for i, article in enumerate(articles, 1):
-        title = article.get('chinese_title', article.get('title', '无标题'))
-        url = article.get('url', '#')
-        markdown_lines.append(f'{i}. [{title}]({url})\n')
-    markdown_lines.append('\n</details>\n---\n')
-    
     for i, article in enumerate(articles, 1):
         markdown_lines.append(f'\n## {i}. {article["chinese_title"]}\n')
         
