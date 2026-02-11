@@ -67,6 +67,57 @@ os.makedirs(RSS_CACHE_DIR, exist_ok=True)
 os.makedirs(AI_CACHE_DIR, exist_ok=True)
 
 
+def clean_expired_cache(cache_dir: str, ttl: int, cache_type: str = "cache"):
+    """
+    清理过期的缓存文件
+    
+    Args:
+        cache_dir: 缓存目录路径
+        ttl: 缓存有效期（秒）
+        cache_type: 缓存类型（用于日志）
+    """
+    if not os.path.exists(cache_dir):
+        return
+    
+    current_time = datetime.now().timestamp()
+    cleaned_count = 0
+    total_size = 0
+    
+    try:
+        for filename in os.listdir(cache_dir):
+            filepath = os.path.join(cache_dir, filename)
+            
+            if os.path.isfile(filepath):
+                file_time = os.path.getmtime(filepath)
+                file_age = current_time - file_time
+                
+                if file_age > ttl:
+                    file_size = os.path.getsize(filepath)
+                    os.remove(filepath)
+                    cleaned_count += 1
+                    total_size += file_size
+                    logger.info(f"🗑️ 删除过期{cache_type}: {filename} (已过期 {file_age // 3600:.1f} 小时)")
+        
+        if cleaned_count > 0:
+            size_mb = total_size / (1024 * 1024)
+            logger.info(f"✅ {cache_type}清理完成: 删除 {cleaned_count} 个文件, 释放 {size_mb:.2f} MB")
+        else:
+            logger.info(f"✅ {cache_type}无需清理: 所有文件都在有效期内")
+            
+    except Exception as e:
+        logger.warning(f"⚠️ 清理{cache_type}失败: {str(e)}")
+
+
+def clean_all_expired_caches():
+    """清理所有过期的缓存"""
+    logger.info("🧹 开始清理过期缓存...")
+    
+    clean_expired_cache(RSS_CACHE_DIR, RSS_CACHE_TTL, "RSS缓存")
+    clean_expired_cache(AI_CACHE_DIR, AI_CACHE_TTL, "AI缓存")
+    
+    logger.info("🧹 缓存清理完成")
+
+
 def get_rss_cache_path(rss_url: str) -> str:
     """获取RSS缓存文件路径"""
     # 使用URL的hash作为文件名
@@ -988,7 +1039,24 @@ def _generate_markdown(articles: List[Dict]) -> str:
     markdown_lines.append('# 户外运动周报\n')
     markdown_lines.append(f'生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
     markdown_lines.append(f'共收录 {len(articles)} 篇文章\n')
-    markdown_lines.append('---\n')
+    
+    # 提取搜索的网站列表
+    source_sites = list(set(article.get('site', '') for article in articles if article.get('site')))
+    if source_sites:
+        markdown_lines.append('\n## 搜索来源网站\n')
+        for site in source_sites:
+            markdown_lines.append(f'- {site}\n')
+        markdown_lines.append('\n---\n')
+    
+    # 添加文章标题和链接汇总（折叠）
+    markdown_lines.append('\n## 文章列表\n')
+    markdown_lines.append('<details>\n')
+    markdown_lines.append('<summary>点击展开文章列表</summary>\n\n')
+    for i, article in enumerate(articles, 1):
+        title = article.get('chinese_title', article.get('title', '无标题'))
+        url = article.get('url', '#')
+        markdown_lines.append(f'{i}. [{title}]({url})\n')
+    markdown_lines.append('\n</details>\n---\n')
     
     for i, article in enumerate(articles, 1):
         markdown_lines.append(f'\n## {i}. {article["chinese_title"]}\n')
@@ -1262,18 +1330,18 @@ def publish_feishu_report(report_title, markdown_content, chat_id):
             .content(json.dumps(card_content)) \
             .build()) \
         .build()
-
-    try:
-        msg_resp = client.im.v1.message.create(msg_req)
+    # 测试需要，暂时注释发送飞书群组代码
+    # try:
+    #     msg_resp = client.im.v1.message.create(msg_req)
         
-        if msg_resp.success():
-            print("✅ 消息推送成功")
-        else:
-            print(f"⚠️ 消息推送失败: {msg_resp.code} - {msg_resp.msg}")
-            print("📝 仍然返回文档URL...")
-    except Exception as e:
-        print(f"⚠️ 发送消息时出错: {e}")
-        print("📝 仍然返回文档URL...")
+    #     if msg_resp.success():
+    #         print("✅ 消息推送成功")
+    #     else:
+    #         print(f"⚠️ 消息推送失败: {msg_resp.code} - {msg_resp.msg}")
+    #         print("📝 仍然返回文档URL...")
+    # except Exception as e:
+    #     print(f"⚠️ 发送消息时出错: {e}")
+    #     print("📝 仍然返回文档URL...")
     
     # 关键：始终返回文档URL，即使内容写入或消息推送失败
     print(f"🎉 飞书文档发布完成!")

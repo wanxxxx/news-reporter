@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  outdoor-sports-reporter:
+    image: openclaw-feishu:v1
+    container_name: outdoor-sports-reporter
+    
+    environment:
+      # ==========================================
+      # 代理配置 - 通过 host.docker.internal 访问宿主机的 VPN
+      # 根据你的 VPN 软件修改端口 (常见: 7890, 1080, 8080)
+      # ==========================================
+      - HTTP_PROXY=http://host.docker.internal:7890
+      - HTTPS_PROXY=http://host.docker.internal:7890
+      - ALL_PROXY=socks5://host.docker.internal:7890
+      
+      # ==========================================
+      # 其他配置
+      # ==========================================
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - PYTHONIOENCODING=utf-8
+      
+    # 直接从 .env 文件加载所有配置
+    env_file:
+      - .env
+      
+    volumes:
+      # 代码目录 - 挂载当前目录到容器的 /app
+      - .:/app
+      
+      # 输出目录 - 持久化生成的周报
+      - ./output:/app/output
+      
+      # 缓存目录 - 持久化 RSS 和 AI 缓存
+      - ./cache:/app/cache
+      
+      # 环境变量文件 (可选，如果已经在 environment 中配置了)
+      - ./.env:/app/.env:ro
+
+      # 保存openclaw工作空间
+      - ./docker_container_openclaw_data:/root/.openclaw/workspace
+      
+    # 工作目录
+    working_dir: /app
+    
+    # 保持容器运行，方便手动执行
+    stdin_open: true
+    tty: true
+    
+    # 启动脚本 - 先安装依赖，然后启动 openclaw gateway
+    command: ["bash", "/app/entrypoint.sh"]
+    
+    # 网络配置 - 使用桥接网络，通过 host.docker.internal 访问宿主机
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

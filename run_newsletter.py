@@ -23,9 +23,8 @@ import argparse
 from datetime import date, timedelta
 from typing import Optional
 
-from dotenv import load_dotenv
-
-load_dotenv()
+# 直接从环境变量读取，不使用 dotenv
+# load_dotenv()
 
 from newsletter_tools import (
     fetch_outdoor_articles,
@@ -56,6 +55,13 @@ def run_weekly_newsletter_task(chat_id: str = None, days_back: int = 7) -> Optio
     start_date = end_date - timedelta(days=days_back)
     
     print(f"\n📅 文章日期范围: {start_date} 至 {end_date} (过去 {days_back} 天)")
+    
+    print("\n" + "=" * 80)
+    print("🧹 清理过期缓存")
+    print("=" * 80)
+    
+    from newsletter_tools import clean_all_expired_caches
+    clean_all_expired_caches()
     
     print("\n" + "=" * 80)
     print("📥 步骤 1: 获取户外运动相关文章")
