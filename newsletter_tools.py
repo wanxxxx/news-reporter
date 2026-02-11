@@ -326,21 +326,39 @@ def _get_openai_client():
 
 
 # 完整的网站列表（包括所有优质户外运动网站）
-TARGET_SITES = [
+# 支持从环境变量读取配置，格式：用逗号分隔的URL列表
+DEFAULT_TARGET_SITES = [
     'https://explorersweb.com/',      # ✅ RSS源正常，内容丰富
     'https://gripped.com/',           # ✅ RSS源正常，攀岩专业内容
-    'https://www.outsideonline.com/home',  # ✅ RSS源正常，户外综合内容
+    'https://www.outsideonline.com/home', # ✅ RSS源正常，户外综合内容
     'https://www.climbing.com/',      # 🔄 需要认证，但内容质量高
     'https://publications.americanalpineclub.org/'  # 🔄 需要认证，但内容专业
 ]
 
-RSS_FEEDS = {
+# 从环境变量读取网站列表，如果未设置则使用默认值
+TARGET_SITES = os.getenv('TARGET_SITES', '').split(',') if os.getenv('TARGET_SITES') else DEFAULT_TARGET_SITES
+TARGET_SITES = [site.strip() for site in TARGET_SITES if site.strip()]
+
+# RSS源映射（支持从环境变量读取）
+# 格式：site1_url=rss1_url,site2_url=rss2_url
+DEFAULT_RSS_FEEDS = {
     'https://explorersweb.com/': 'https://explorersweb.com/feed/',
     'https://gripped.com/': 'https://gripped.com/feed/',
     'https://www.outsideonline.com/home': 'https://www.outsideonline.com/feed',
     'https://www.climbing.com/': 'https://www.climbing.com/feed/',  # 尝试RSS源
     'https://publications.americanalpineclub.org/': None  # 无RSS源，需要网页解析
 }
+
+# 从环境变量读取RSS映射
+# 格式：site1_url=rss1_url,site2_url=rss2_url
+RSS_FEEDS_ENV = os.getenv('RSS_FEEDS', '')
+RSS_FEEDS = DEFAULT_RSS_FEEDS.copy()
+
+if RSS_FEEDS_ENV:
+    for mapping in RSS_FEEDS_ENV.split(','):
+        if '=' in mapping:
+            site_url, rss_url = mapping.split('=', 1)
+            RSS_FEEDS[site_url.strip()] = rss_url.strip()
 
 def fetch_outdoor_articles(start_date: date, end_date: date, max_workers: int = 3) -> List[Dict]:
     """
