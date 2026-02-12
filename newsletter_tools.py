@@ -6,6 +6,7 @@ import pickle
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 import logging
 
 import feedparser
@@ -43,9 +44,37 @@ from lark_oapi.api.drive.v1 import (
 
 load_dotenv()
 
-# 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class NewsConfig:
+    """
+    新闻周报配置类
+    
+    用于封装不同类型新闻周报的可配置参数，支持灵活扩展多种新闻类型。
+    
+    Attributes:
+        name: 配置名称标识（如 "outdoor_sports", "tech_news"）
+        target_sites: 目标网站URL列表
+        rss_feeds: RSS源映射字典 {site_url: rss_url}
+        ai_prompt: AI分析prompt模板
+        ai_system_prompt: AI系统prompt
+        feishu_collaborator_openids: 飞书协作者openid列表
+        report_title_template: 周报标题模板，支持 {start_date} 和 {end_date} 占位符
+        report_header: 周报标题（Markdown格式）
+        cache_prefix: 缓存前缀，用于区分不同类型新闻的缓存
+    """
+    name: str
+    target_sites: List[str] = field(default_factory=list)
+    rss_feeds: Dict[str, str] = field(default_factory=dict)
+    ai_prompt: str = ""
+    ai_system_prompt: str = "你是一个专业的新闻分析助手，擅长批量提取文章关键信息并进行中英文翻译。"
+    feishu_collaborator_openids: List[str] = field(default_factory=list)
+    report_title_template: str = "{name}周报 ({start_date} 至 {end_date})"
+    report_header: str = "# 新闻周报\n"
+    cache_prefix: str = ""
 
 # 保存原始代理设置
 _original_proxy_settings = {
@@ -58,12 +87,17 @@ _original_proxy_settings = {
 RSS_CACHE_DIR = "cache/rss"
 RSS_CACHE_TTL = 3600  # 1小时缓存
 
+# HTML抓取缓存配置
+HTML_CACHE_DIR = "cache/html"
+HTML_CACHE_TTL = 3600 * 6  # 6小时缓存
+
 # AI处理缓存配置
 AI_CACHE_DIR = "cache/ai"
 AI_CACHE_TTL = 86400 * 7  # 7天缓存（AI处理结果长期有效）
 
 # 创建缓存目录
 os.makedirs(RSS_CACHE_DIR, exist_ok=True)
+os.makedirs(HTML_CACHE_DIR, exist_ok=True)
 os.makedirs(AI_CACHE_DIR, exist_ok=True)
 
 
@@ -113,6 +147,7 @@ def clean_all_expired_caches():
     logger.info("🧹 开始清理过期缓存...")
     
     clean_expired_cache(RSS_CACHE_DIR, RSS_CACHE_TTL, "RSS缓存")
+    clean_expired_cache(HTML_CACHE_DIR, HTML_CACHE_TTL, "HTML缓存")
     clean_expired_cache(AI_CACHE_DIR, AI_CACHE_TTL, "AI缓存")
     
     logger.info("🧹 缓存清理完成")
@@ -166,6 +201,55 @@ def save_rss_to_cache(rss_url: str, feed_data: feedparser.FeedParserDict) -> boo
 
 
 # ================================
+# HTML抓取缓存函数
+# ================================
+
+def get_html_cache_path(url: str) -> str:
+    """获取HTML缓存文件路径"""
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    return os.path.join(HTML_CACHE_DIR, f"{url_hash}.json")
+
+
+def load_html_from_cache(url: str) -> Optional[str]:
+    """从缓存加载HTML内容"""
+    cache_path = get_html_cache_path(url)
+    
+    if not os.path.exists(cache_path):
+        return None
+    
+    try:
+        cache_time = os.path.getmtime(cache_path)
+        current_time = datetime.now().timestamp()
+        
+        if current_time - cache_time > HTML_CACHE_TTL:
+            logger.info(f"📦 HTML缓存过期: {url}")
+            return None
+        
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            cached_data = json.load(f)
+        logger.info(f"📦 HTML缓存命中: {url}")
+        return cached_data.get('content')
+        
+    except Exception as e:
+        logger.warning(f"📦 HTML缓存加载失败: {url} - {str(e)}")
+        return None
+
+
+def save_html_to_cache(url: str, content: str) -> bool:
+    """保存HTML内容到缓存"""
+    cache_path = get_html_cache_path(url)
+    
+    try:
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump({'content': content, 'timestamp': datetime.now().isoformat()}, f, ensure_ascii=False)
+        # logger.info(f"📦 HTML缓存保存: {url}")
+        return True
+    except Exception as e:
+        logger.warning(f"📦 HTML缓存保存失败: {url} - {str(e)}")
+        return False
+
+
+# ================================
 # AI处理缓存函数
 # ================================
 
@@ -194,7 +278,7 @@ def load_ai_from_cache(url: str) -> Optional[Dict]:
         
         with open(cache_path, 'r', encoding='utf-8') as f:
             cached_data = json.load(f)
-        logger.info(f"📦 AI缓存命中: {url}")
+        # logger.info(f"📦 AI缓存命中: {url}")
         return cached_data
         
     except Exception as e:
@@ -340,7 +424,7 @@ if RSS_FEEDS_ENV:
 
 def fetch_outdoor_articles(start_date: date, end_date: date, max_workers: int = 3) -> List[Dict]:
     """
-    并行抓取户外运动相关文章
+    并行抓取户外运动相关文章（向后兼容函数）
     
     Args:
         start_date: 开始日期
@@ -350,20 +434,44 @@ def fetch_outdoor_articles(start_date: date, end_date: date, max_workers: int = 
     Returns:
         文章列表
     """
+    return fetch_articles(start_date, end_date, max_workers=max_workers)
+
+
+def fetch_articles(start_date: date, end_date: date, 
+                   config: NewsConfig = None,
+                   target_sites: List[str] = None,
+                   rss_feeds: Dict[str, str] = None,
+                   max_workers: int = 3) -> List[Dict]:
+    """
+    并行抓取新闻文章（通用版本）
+    
+    支持两种调用方式：
+    1. 通过 NewsConfig 配置对象传入参数
+    2. 直接传入 target_sites 和 rss_feeds 参数
+    
+    Args:
+        start_date: 开始日期
+        end_date: 结束日期
+        config: NewsConfig 配置对象（优先使用）
+        target_sites: 目标网站列表（config 为空时使用）
+        rss_feeds: RSS源映射（config 为空时使用）
+        max_workers: 最大并行工作线程数（仅用于网站级并发）
+    
+    Returns:
+        文章列表
+    """
+    sites = config.target_sites if config else (target_sites or TARGET_SITES)
+    feeds = config.rss_feeds if config else (rss_feeds or RSS_FEEDS)
+    
     logger.info(f"🚀 开始并行抓取文章: {start_date} 到 {end_date}")
     
-    # 确保网站抓取时使用代理
     enable_proxy_for_web_scraping()
     
-    # 网站级并发：多个RSS源同时抓取，每个网站内部串行处理
-    # 优化后的并发策略：max_workers=3 确保最多3个网站同时抓取
-    # 每个网站内部的文章提取都是串行的，避免嵌套并发和连接池问题
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 提交所有抓取任务
         futures = []
-        site_url_map = {}  # 记录future和对应网站URL的映射
-        for site_url in TARGET_SITES:
-            rss_feed = RSS_FEEDS.get(site_url)
+        site_url_map = {}
+        for site_url in sites:
+            rss_feed = feeds.get(site_url)
             
             if rss_feed:
                 future = executor.submit(_fetch_from_rss, rss_feed, site_url, start_date, end_date)
@@ -371,9 +479,8 @@ def fetch_outdoor_articles(start_date: date, end_date: date, max_workers: int = 
                 future = executor.submit(_fetch_from_html, site_url, start_date, end_date)
             
             futures.append(future)
-            site_url_map[id(future)] = site_url  # 记录映射关系
+            site_url_map[id(future)] = site_url
         
-        # 收集结果
         articles = []
         completed = 0
         for future in as_completed(futures):
@@ -381,19 +488,16 @@ def fetch_outdoor_articles(start_date: date, end_date: date, max_workers: int = 
                 site_result = future.result()
                 current_site_url = site_url_map.get(id(future), "未知网站")
                 
-                # 处理不同类型的返回值
                 if isinstance(site_result, dict):
-                    # _fetch_from_html 返回字典
                     site_articles = site_result.get('articles', [])
                     articles.extend(site_articles)
                 elif isinstance(site_result, list):
-                    # _fetch_from_rss 返回列表
                     articles.extend(site_result)
                 else:
                     logger.warning(f"⚠️ 未知返回类型: {type(site_result)}")
                 
                 completed += 1
-                logger.info(f"✅ 完成 {completed}/{len(TARGET_SITES)} 个网站：{current_site_url}")
+                logger.info(f"✅ 完成 {completed}/{len(sites)} 个网站：{current_site_url}")
             except Exception as e:
                 current_site_url = site_url_map.get(id(future), "未知网站")
                 logger.error(f"❌ 抓取网站失败: {current_site_url} - {str(e)}")
@@ -535,25 +639,49 @@ def _fetch_from_html(site_url: str, start_date: date, end_date: date) -> Dict:
         }
     }
     
-    # 为HTML抓取创建专门的requests会话，绕过全局代理清除
     import requests
     from requests.adapters import HTTPAdapter
     from urllib3.util.retry import Retry
+    import ssl
+    import urllib3
     
-    # 创建新的会话，不继承之前的代理设置
     session = requests.Session()
     
-    # 备份并恢复代理环境变量
     original_env_backup = os.environ.copy()
     
+    BROWSER_HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"'
+    }
+    
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
     try:
-        # 恢复代理设置以支持需要VPN的网站
         enable_proxy_for_web_scraping()
-        
-        # 设置会话信任环境变量（重要！）
         session.trust_env = True
+        session.headers.update(BROWSER_HEADERS)
         
-        # 发送请求
+        logger.info(f"🌐 尝试通过代理访问: {site_url}")
         response = session.get(site_url, timeout=30)
         response.raise_for_status()
         
@@ -572,11 +700,10 @@ def _fetch_from_html(site_url: str, start_date: date, end_date: date) -> Dict:
                         'url': link,
                         'title': _extract_title_from_url(link),
                         'content_text': content_text,
-                        'date': None  # HTML抓取可能没有具体日期
+                        'date': None
                     })
                     result['statistics']['successful_extraction'] += 1
                 else:
-                    # 内容提取失败，但保留链接信息
                     result['failed_articles'].append({
                         'site': site_url,
                         'url': link,
@@ -600,44 +727,151 @@ def _fetch_from_html(site_url: str, start_date: date, end_date: date) -> Dict:
                 })
                 result['statistics']['failed_extraction'] += 1
         
-    except Exception as e:
-        error_msg = f"HTML抓取失败 {site_url}: {str(e)}"
-        logger.error(f"❌ {error_msg}")
-        result['statistics']['error_messages'].append(error_msg)
+    except Exception as proxy_error:
+        proxy_error_msg = str(proxy_error)
+        logger.warning(f"⚠️ 代理访问失败: {proxy_error_msg}")
+        
+        if 'ProxyError' in proxy_error_msg or 'SSL' in proxy_error_msg or 'proxy' in proxy_error_msg.lower():
+            logger.info(f"🔄 尝试直连访问（绕过代理）: {site_url}")
+            
+            try:
+                session.close()
+                session = requests.Session()
+                
+                clear_all_proxy()
+                session.trust_env = False
+                session.headers.update(BROWSER_HEADERS)
+                
+                session.mount("http://", adapter)
+                session.mount("https://", adapter)
+                
+                response = session.get(site_url, timeout=30)
+                response.raise_for_status()
+                
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                article_links = _extract_article_links(soup, site_url)
+                result['statistics']['total_entries'] = len(article_links)
+                
+                for link in article_links:
+                    try:
+                        content_text = _extract_content_with_session_direct(link, session)
+                        
+                        if content_text:
+                            result['articles'].append({
+                                'site': site_url,
+                                'url': link,
+                                'title': _extract_title_from_url(link),
+                                'content_text': content_text,
+                                'date': None
+                            })
+                            result['statistics']['successful_extraction'] += 1
+                        else:
+                            result['failed_articles'].append({
+                                'site': site_url,
+                                'url': link,
+                                'title': _extract_title_from_url(link),
+                                'error': '内容提取失败',
+                                'date': None
+                            })
+                            result['statistics']['failed_extraction'] += 1
+                            
+                    except Exception as e:
+                        error_msg = f"处理链接失败: {link} - {str(e)}"
+                        logger.warning(f"⚠️ {error_msg}")
+                        result['statistics']['error_messages'].append(error_msg)
+                        
+                        result['failed_articles'].append({
+                            'site': site_url,
+                            'url': link,
+                            'title': _extract_title_from_url(link),
+                            'error': str(e),
+                            'date': None
+                        })
+                        result['statistics']['failed_extraction'] += 1
+                
+                logger.info(f"✅ 直连访问成功: {site_url}")
+                
+            except Exception as direct_error:
+                error_msg = f"HTML抓取失败（代理和直连均失败） {site_url}: 代理错误={proxy_error_msg}, 直连错误={str(direct_error)}"
+                logger.error(f"❌ {error_msg}")
+                result['statistics']['error_messages'].append(error_msg)
+        else:
+            error_msg = f"HTML抓取失败 {site_url}: {proxy_error_msg}"
+            logger.error(f"❌ {error_msg}")
+            result['statistics']['error_messages'].append(error_msg)
     
     finally:
-        # 关闭会话
         session.close()
-        # 恢复环境变量状态
         os.environ.clear()
         os.environ.update(original_env_backup)
     
     return result
 
 
-def _extract_content_with_session(url: str, session: requests.Session) -> Optional[str]:
-    """使用指定会话提取内容，用于支持VPN代理"""
+def _extract_content_with_session_direct(url: str, session: requests.Session) -> Optional[str]:
+    """直连方式提取内容（不使用代理）"""
+    cached_content = load_html_from_cache(url)
+    if cached_content:
+        return cached_content
+    
     try:
-        # 设置请求头，模拟浏览器访问
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
         }
         
-        # 使用指定会话发送请求
         response = session.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # 移除脚本和样式
             for script in soup(["script", "style"]):
                 script.decompose()
             
-            # 提取文本
             content = soup.get_text()
             if content and len(content.strip()) > 100:
-                return content.strip()
+                content = content.strip()
+                save_html_to_cache(url, content)
+                return content
+                
+    except Exception as e:
+        logger.warning(f"直连内容提取失败: {url} - {str(e)}")
+    
+    return None
+
+
+def _extract_content_with_session(url: str, session: requests.Session) -> Optional[str]:
+    """使用指定会话提取内容，用于支持VPN代理"""
+    cached_content = load_html_from_cache(url)
+    if cached_content:
+        return cached_content
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+        }
+        
+        response = session.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            for script in soup(["script", "style"]):
+                script.decompose()
+            
+            content = soup.get_text()
+            if content and len(content.strip()) > 100:
+                content = content.strip()
+                save_html_to_cache(url, content)
+                return content
                 
     except Exception as e:
         logger.warning(f"后备内容提取失败: {url} - {str(e)}")
@@ -745,12 +979,16 @@ def _is_english(text: str) -> bool:
 
 
 
-def process_articles_with_ai(articles_list: List[Dict], max_workers: int = 10, batch_size: int = 3) -> str:
+def process_articles_with_ai(articles_list: List[Dict], 
+                              config: NewsConfig = None,
+                              max_workers: int = 10, 
+                              batch_size: int = 3) -> str:
     """
-    批量并行处理文章并生成Markdown（支持缓存）
+    批量并行处理文章并生成Markdown（支持缓存和自定义配置）
     
     Args:
         articles_list: 文章列表
+        config: NewsConfig 配置对象（包含 AI prompt 等配置）
         max_workers: 最大并行工作线程数
         batch_size: 每个批量处理的文章数量（建议3-5篇）
     
@@ -760,7 +998,6 @@ def process_articles_with_ai(articles_list: List[Dict], max_workers: int = 10, b
     if not articles_list:
         return ''
     
-    # 首先筛选出需要AI处理的文章（缓存未命中）
     cached_articles = []
     articles_to_process = []
     
@@ -775,41 +1012,35 @@ def process_articles_with_ai(articles_list: List[Dict], max_workers: int = 10, b
     
     logger.info(f"📊 AI缓存统计: {len(cached_articles)}篇命中缓存, {len(articles_to_process)}篇需要AI处理")
     
-    # 如果所有文章都有缓存，直接生成Markdown
     if not articles_to_process:
         logger.info("✅ 所有文章均命中缓存，跳过AI处理")
-        return _generate_markdown(cached_articles)
+        return _generate_markdown(cached_articles, config)
     
     try:
         client = _get_openai_client()
     except Exception as e:
         logger.error(f"初始化AI客户端失败: {str(e)}")
-        # 如果有缓存的文章，仍然返回缓存结果
         if cached_articles:
-            return _generate_markdown(cached_articles)
+            return _generate_markdown(cached_articles, config)
         return ''
     
     logger.info(f"🚀 开始批量并行AI处理: {len(articles_to_process)} 篇文章")
     logger.info(f"🤖 AI批量设置: batch_size={batch_size}, max_workers={max_workers}")
     
-    # 将需要处理的文章分批
     batches = [articles_to_process[i:i + batch_size] for i in range(0, len(articles_to_process), batch_size)]
     logger.info(f"🤖 分为 {len(batches)} 个批次进行并行处理")
     
     newly_processed_articles = []
     completed = 0
     
-    # 并行处理批次
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 提交所有批量处理任务
         futures = []
-        batch_index_map = {}  # 记录future和对应批次数的映射
+        batch_index_map = {}
         for i, batch in enumerate(batches, 1):
-            future = executor.submit(_process_batch_with_ai, client, batch, i)
+            future = executor.submit(_process_batch_with_ai, client, batch, i, config)
             futures.append(future)
-            batch_index_map[id(future)] = i  # 记录映射关系
+            batch_index_map[id(future)] = i
         
-        # 收集结果
         for future in as_completed(futures):
             try:
                 batch_results = future.result()
@@ -822,23 +1053,24 @@ def process_articles_with_ai(articles_list: List[Dict], max_workers: int = 10, b
                 logger.error(f"❌ 批量处理失败: 批次 {current_batch_index} - {str(e)}")
                 completed += 1
     
-    # 合并缓存结果和新处理的结果
     all_processed_articles = cached_articles + newly_processed_articles
     logger.info(f"🎉 批量并行AI处理完成: {len(cached_articles)}篇来自缓存, {len(newly_processed_articles)}篇新处理, 总计{len(all_processed_articles)}篇")
     
-    markdown_text = _generate_markdown(all_processed_articles)
+    markdown_text = _generate_markdown(all_processed_articles, config)
     
     return markdown_text
 
 
-def _process_batch_with_ai(client: OpenAI, batch: List[Dict], batch_index: int) -> List[Dict]:
+def _process_batch_with_ai(client: OpenAI, batch: List[Dict], batch_index: int, 
+                           config: NewsConfig = None) -> List[Dict]:
     """
-    批量处理文章（一次处理多篇文章，支持缓存）
+    批量处理文章（一次处理多篇文章，支持缓存和自定义配置）
     
     Args:
         client: OpenAI客户端
         batch: 文章批次
         batch_index: 批次索引
+        config: NewsConfig 配置对象（包含自定义 AI prompt）
     
     Returns:
         处理后的文章列表
@@ -848,7 +1080,6 @@ def _process_batch_with_ai(client: OpenAI, batch: List[Dict], batch_index: int) 
     
     logger.info(f"🔄 处理批次 {batch_index}: {len(batch)} 篇文章")
     
-    # 首先检查每篇文章的缓存
     cached_results = []
     articles_to_process = []
     
@@ -861,16 +1092,13 @@ def _process_batch_with_ai(client: OpenAI, batch: List[Dict], batch_index: int) 
         else:
             articles_to_process.append(article)
     
-    # 如果所有文章都有缓存，直接返回
     if not articles_to_process:
         logger.info(f"✅ 批次 {batch_index} 全部命中缓存")
         return [result for _, result in cached_results]
     
-    # 如果有部分文章需要处理，构建prompt
     if len(articles_to_process) < len(batch):
         logger.info(f"📦 批次 {batch_index}: {len(cached_results)}篇命中缓存, {len(articles_to_process)}篇需要AI处理")
     
-    # 构建批量处理的prompt（只处理未缓存的文章）
     articles_info = []
     for i, article in enumerate(articles_to_process, 1):
         title = article.get('title', '')
@@ -888,61 +1116,19 @@ def _process_batch_with_ai(client: OpenAI, batch: List[Dict], batch_index: int) 
     
     batch_content = '\n'.join(articles_info)
     
-    prompt = f"""
-# Role
-你是一名资深的**户外文化主编**。你的核心能力是**"透过现象看本质"**。
-你精通登山、攀岩、滑雪等垂直领域，擅长从简单的行业新闻中发掘出适合制作**深度播客**或**长文分析**的选题。
-# Task
-分析以下 {len(articles_to_process)} 篇户外文章。请根据每篇文章的**具体内容属性**，灵活匹配最合适的选题角度。
-
-# Input Data
-{batch_content}
-
-# Goals (Adaptive Angles)
-在生成 `curated_angles` 时，请遵循以下**自适应逻辑**，不要生搬硬套：
-
-1. **如果是【攀登/探险新闻】**：
-   - 关注：**心理博弈**（恐惧与勇气）、**风格之争**（阿式 vs 喜式）、**历史回溯**（与前人路线的对比）、**技术细节**。
-2. **如果是【影像/纪录片新闻】**：
-   - 关注：**叙事视角**、**拍摄伦理**、**美学风格**、**导演意图**。
-3. **如果是【事故/悲剧】**：
-   - 关注：**风险管理**、**探险伦理**、**救援体系**、**生命反思**。
-4. **如果是【商业/装备/行业新闻】**：
-   - 关注：**消费主义**、**环保困境**、**品牌文化**、**大众化与硬核的冲突**。
-
-**要求：**
-- 至少返回 3 个角度。
-- 每个角度的【标签】由你根据内容**自动生成**（例如：【商业观察】、【技术分析】、【历史钩沉】、【心理探索】等），不要局限于固定的词汇。
-
-# Output Format
-请严格按照以下 JSON 结构返回一个**数组 (Array)**。严禁包含 Markdown 标记（如 ```json）。
-
-[
-  {{
-    "chinese_title": "String, 标题的中文翻译（信达雅，使用专业术语）",
-    "summary": "String, 用中文一句话概括核心事件（人物+地点+成就/事故）",
-    "key_persons": [
-      "String, 关键人物原名"
-    ],
-    "key_person_bios": [
-      "String, 关键人物的中文一句话简介 (必填！如果文中没写，请利用你的知识补充该人物的代表作、风格或历史地位)"
-    ],
-    "location_name": "String, 事件地点 (英文或中文)",
-    "location_context": "String, 地点背景 (必填！如果文中没写，请补充该地点的地理位置、攀登历史、难度等级或户外文化意义)",
-    "event_date": "String, 事件发生时间 (如 '2023-10' 或 '近期')",
-    "curated_angles": [
-      "String, 选题角度1 (格式：【标签】+ 深度描述)",
-      "String, 选题角度2 (格式：【标签】+ 深度描述)",
-      "String, 选题角度3 (格式：【标签】+ 深度描述)"
-    ]
-  }}
-]
-
-# Constraints
-1. `key_persons` 和 `key_person_bios` 必须是字符串数组，且长度相同，顺序一一对应。例如：key_persons: ["Alex Honnold", "Tommy Caldwell"], key_person_bios: ["美国攀岩运动员，以无保护独攀闻名", "美国攀岩运动员，以大岩壁攀登闻名"]。如果文章没有提及人物，两个数组都返回空数组 `[]`。
-2. `location_context` 不能为空字符串。
-3. `curated_angles` 必须包含 3 个不同的切入点。
-"""
+    if not config or not config.ai_prompt:
+        raise ValueError("NewsConfig.ai_prompt is required for AI processing")
+    
+    if not config.ai_system_prompt:
+        raise ValueError("NewsConfig.ai_system_prompt is required for AI processing")
+    
+    ai_prompt_template = config.ai_prompt
+    ai_system_prompt = config.ai_system_prompt
+    
+    prompt = ai_prompt_template.format(
+        article_count=len(articles_to_process),
+        batch_content=batch_content
+    )
     
     try:
         model_name = os.getenv('LLM_MODEL')
@@ -952,18 +1138,24 @@ def _process_batch_with_ai(client: OpenAI, batch: List[Dict], batch_index: int) 
         response = client.chat.completions.create(
             model=model_name,
             messages=[
-                {'role': 'system', 'content': '你是一个专业的户外新闻方向的文章分析助手，擅长批量提取文章关键信息并进行中英文翻译。'},
+                {'role': 'system', 'content': ai_system_prompt},
                 {'role': 'user', 'content': prompt}
             ],
             temperature=0.3,
             response_format={'type': 'json_object'},
-            timeout=60  # 批量处理需要更长时间
+            timeout=60
         )
         
         result_text = response.choices[0].message.content.strip()
         
         logger.info(f"🤖 AI返回原始内容长度: {len(result_text)} 字符")
         logger.info(f"🤖 AI返回原始内容: {result_text}")
+        
+        # 清理 Markdown 代码块标记（AI 有时会返回 ```json ... ```）
+        if result_text.startswith('```'):
+            lines = result_text.split('\n')
+            result_text = '\n'.join(lines[1:-1]) if len(lines) > 2 else result_text
+            result_text = result_text.strip()
         
         # 解析JSON结果
         import json
@@ -1055,16 +1247,27 @@ def _process_batch_with_ai(client: OpenAI, batch: List[Dict], batch_index: int) 
         return processed
 
 
-def _generate_markdown(articles: List[Dict]) -> str:
+def _generate_markdown(articles: List[Dict], config: NewsConfig = None) -> str:
+    """
+    生成 Markdown 格式的周报内容
+    
+    Args:
+        articles: 处理后的文章列表
+        config: NewsConfig 配置对象（包含自定义标题等）
+    
+    Returns:
+        Markdown 格式的周报文本
+    """
     if not articles:
         return ''
     
     markdown_lines = []
-    markdown_lines.append('# 户外运动周报\n')
+    
+    report_header = config.report_header if config and config.report_header else '# 户外运动周报\n'
+    markdown_lines.append(report_header)
     markdown_lines.append(f'生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
     markdown_lines.append(f'共收录 {len(articles)} 篇文章\n')
     
-    # 提取搜索的网站列表
     source_sites = list(set(article.get('site') for article in articles if isinstance(article, dict) and article.get('site')))
     if source_sites:
         markdown_lines.append('\n## 搜索来源网站\n')
@@ -1073,7 +1276,14 @@ def _generate_markdown(articles: List[Dict]) -> str:
         markdown_lines.append('\n---\n')
     
     for i, article in enumerate(articles, 1):
-        markdown_lines.append(f'\n## {i}. {article["chinese_title"]}\n')
+        # 确保 article 是字典类型
+        if not isinstance(article, dict):
+            logger.warning(f"⚠️ 跳过非字典类型的文章: {type(article)}")
+            continue
+        
+        # 确保必要字段存在
+        chinese_title = article.get('chinese_title', '未知标题')
+        markdown_lines.append(f'\n## {i}. {chinese_title}\n')
         
         if article.get('original_title') and article.get('original_title') != article.get('chinese_title'):
             markdown_lines.append(f'**原标题**: {article["original_title"]}\n')
@@ -1081,7 +1291,9 @@ def _generate_markdown(articles: List[Dict]) -> str:
         if article.get('date'):
             markdown_lines.append(f'**日期**: {article["date"]}\n')
         
-        markdown_lines.append(f'**链接**: {article["url"]}\n')
+        # 处理链接字段
+        url = article.get('url', '未知链接')
+        markdown_lines.append(f'**链接**: {url}\n')
         
         if article.get('event_date'):
             markdown_lines.append(f'**事件日期**: {article["event_date"]}\n')
@@ -1100,10 +1312,10 @@ def _generate_markdown(articles: List[Dict]) -> str:
             markdown_lines.append(f'**关键人物**:\n')
             key_persons = article['key_persons']
             key_person_bios = article.get('key_person_bios', [])
-            for i, name in enumerate(key_persons):
+            for j, name in enumerate(key_persons):
                 person_encoded = name.replace(' ', '+')
                 search_url = f"https://www.google.com/search?q={person_encoded}+outdoor"
-                bio = key_person_bios[i] if i < len(key_person_bios) else ''
+                bio = key_person_bios[j] if j < len(key_person_bios) else ''
                 if bio:
                     markdown_lines.append(f'- [{name}]({search_url})：{bio}\n')
                 else:
@@ -1176,9 +1388,21 @@ def _parse_text_with_links(text):
         
     return elements
 
-def publish_feishu_report(report_title, markdown_content, chat_id):
+def publish_feishu_report(report_title, markdown_content, chat_id, 
+                          collaborator_openids: List[str] = None):
     """
+    发布周报到飞书文档
+    
     核心功能: 创建文档 -> 写入内容 -> 发送卡片
+    
+    Args:
+        report_title: 周报标题
+        markdown_content: Markdown 格式的周报内容
+        chat_id: 飞书群组 ID
+        collaborator_openids: 协作者 openid 列表（可选，优先于环境变量）
+    
+    Returns:
+        飞书文档链接，失败返回 None
     """
     print(f"🚀 [Feishu] 准备发布文档: {report_title}")
     
@@ -1206,11 +1430,16 @@ def publish_feishu_report(report_title, markdown_content, chat_id):
         doc_url = f"https://feishu.cn/docx/{document_id}"
         print(f"✅ 文档创建成功: {doc_url}")
 
-        collaborator_openids = os.getenv("FEISHU_COLLABORATOR_OPENIDS", "")
+        # 优先使用传入的协作者列表，其次使用环境变量
+        openids = collaborator_openids if collaborator_openids else []
+        if not openids:
+            env_openids = os.getenv("FEISHU_COLLABORATOR_OPENIDS", "")
+            if env_openids:
+                openids = [oid.strip() for oid in env_openids.split(",") if oid.strip()]
+        
         collaborator_perm = os.getenv("FEISHU_COLLABORATOR_PERM", "edit")
         
-        if collaborator_openids:
-            openids = [oid.strip() for oid in collaborator_openids.split(",") if oid.strip()]
+        if openids:
             
             added_count = 0
             failed_count = 0
@@ -1375,19 +1604,19 @@ def publish_feishu_report(report_title, markdown_content, chat_id):
             .build()) \
         .build()
 
-    try:
-        msg_resp = client.im.v1.message.create(msg_req)
+    # try:
+    #     msg_resp = client.im.v1.message.create(msg_req)
         
-        if msg_resp.success():
-            print("✅ 消息推送成功")
-        else:
-            print(f"⚠️ 消息推送失败: {msg_resp.code} - {msg_resp.msg}")
-            print("📝 仍然返回文档URL...")
-    except Exception as e:
-        print(f"⚠️ 发送消息时出错: {e}")
-        print("📝 仍然返回文档URL...")
+    #     if msg_resp.success():
+    #         print("✅ 消息推送成功")
+    #     else:
+    #         print(f"⚠️ 消息推送失败: {msg_resp.code} - {msg_resp.msg}")
+    #         print("📝 仍然返回文档URL...")
+    # except Exception as e:
+    #     print(f"⚠️ 发送消息时出错: {e}")
+    #     print("📝 仍然返回文档URL...")
     
-    # 关键：始终返回文档URL，即使内容写入或消息推送失败
-    print(f"🎉 飞书文档发布完成!")
-    print(f"📄 文档链接: {doc_url}")
+    # # 关键：始终返回文档URL，即使内容写入或消息推送失败
+    # print(f"🎉 飞书文档发布完成!")
+    # print(f"📄 文档链接: {doc_url}")
     return doc_url
