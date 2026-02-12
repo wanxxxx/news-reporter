@@ -1,9 +1,9 @@
 """
-通用新闻周报任务执行模块
+通用新闻汇总任务执行模块
 
-本模块提供通用的新闻周报工作流：
-1. run_newsletter_task: 运行完整的周报生成和发布任务（通用版本）
-2. run_weekly_newsletter_task: 户外运动周报任务（向后兼容）
+本模块提供通用的新闻汇总工作流：
+1. run_newsletter_task: 运行完整的新闻汇总生成和发布任务（通用版本）
+2. run_weekly_newsletter_task: 户外运动新闻汇总任务（向后兼容）
 3. run_quick_test: 快速测试模式，使用预设数据验证流程
 
 工作流程:
@@ -13,7 +13,7 @@
     # 运行通用任务（需要提供配置）
     python run_newsletter.py
     
-    # 运行户外运动周报（过去3天）
+    # 运行户外运动新闻汇总（过去3天）
     python run_newsletter.py --days 3
     
     # 测试模式
@@ -44,7 +44,7 @@ def get_default_outdoor_config() -> NewsConfig:
     Returns:
         NewsConfig: 户外运动新闻配置
     """
-    from run_weekly_outdoor_newsletter import get_outdoor_ai_prompt, get_outdoor_ai_system_prompt
+    from run_outdoor_news_summary import get_outdoor_ai_prompt, get_outdoor_ai_system_prompt
     
     target_sites = os.getenv('TARGET_SITES', '').split(',') if os.getenv('TARGET_SITES') else []
     target_sites = [site.strip() for site in target_sites if site.strip()]
@@ -69,8 +69,8 @@ def get_default_outdoor_config() -> NewsConfig:
         ai_prompt=get_outdoor_ai_prompt(),
         ai_system_prompt=get_outdoor_ai_system_prompt(),
         feishu_collaborator_openids=feishu_openids,
-        report_title_template="户外运动周报 ({start_date} 至 {end_date})",
-        report_header="# 户外运动周报\n",
+        report_title_template="户外运动新闻汇总 ({start_date} 至 {end_date})",
+        report_header="# 户外运动新闻汇总\n",
         cache_prefix="outdoor_"
     )
 
@@ -81,7 +81,7 @@ def run_newsletter_task(config: NewsConfig,
                         start_date: date = None,
                         end_date: date = None) -> Optional[str]:
     """
-    通用新闻周报任务执行函数
+    通用新闻汇总任务执行函数
     
     支持两种模式：
     1. 按天数回溯：指定 days_back 参数，自动计算日期范围
@@ -107,7 +107,7 @@ def run_newsletter_task(config: NewsConfig,
         chat_id = os.getenv('FEISHU_CHAT_ID')
     
     print("=" * 80)
-    print(f"🚀 开始运行 {config.name} 周报生成任务")
+    print(f"🚀 开始运行 {config.name} 新闻汇总生成任务")
     print("=" * 80)
     
     if days_back is not None:
@@ -156,13 +156,13 @@ def run_newsletter_task(config: NewsConfig,
     markdown_content = process_articles_with_ai(articles, config=config)
     
     if not markdown_content:
-        print("\n❌ AI 处理失败，无法生成周报")
+        print("\n❌ AI 处理失败，无法生成新闻汇总")
         return None
     
     md_output_file = f'output/ai_{config.name}_{actual_start_date}_to_{actual_end_date}.md'
     with open(md_output_file, 'w', encoding='utf-8') as f:
         f.write(markdown_content)
-    print(f"📄 Markdown 周报已保存到: {md_output_file}")
+    print(f"📄 Markdown 新闻汇总已保存到: {md_output_file}")
     
     article_count = markdown_content.count('\n## ')
     print(f"\n✅ AI 处理完成，共生成 {article_count} 篇文章的摘要")
@@ -191,7 +191,7 @@ def run_newsletter_task(config: NewsConfig,
     
     if doc_url:
         print("\n" + "=" * 80)
-        print("🎉 周报生成和发布任务完成！")
+        print("🎉 新闻汇总生成和发布任务完成！")
         print("=" * 80)
         print(f"\n📄 文档链接: {doc_url}")
         print(f"📅 涵盖日期: {actual_start_date} 至 {actual_end_date}")
@@ -204,7 +204,7 @@ def run_newsletter_task(config: NewsConfig,
 
 def run_weekly_newsletter_task(chat_id: str = None, days_back: int = 7) -> Optional[str]:
     """
-    运行户外运动周报生成任务（向后兼容函数）
+    运行户外运动新闻汇总生成任务（向后兼容函数）
     
     Args:
         chat_id: 飞书群组ID，为空则尝试从环境变量读取
@@ -262,7 +262,7 @@ def run_quick_test(config: NewsConfig = None, chat_id: str = None) -> Optional[s
         f.write(markdown_content)
     print(f"✅ Markdown 已保存到: {md_file}")
     
-    report_title = f"{config.name}周报（测试）"
+    report_title = f"{config.name}新闻汇总（测试）"
     
     if chat_id:
         print(f"\n📤 发布到飞书群组: {chat_id}")
@@ -286,7 +286,7 @@ def run_quick_test(config: NewsConfig = None, chat_id: str = None) -> Optional[s
 
 def main():
     parser = argparse.ArgumentParser(
-        description='通用新闻周报生成和发布工具',
+        description='通用新闻汇总生成和发布工具',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:

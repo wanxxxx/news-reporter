@@ -51,9 +51,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class NewsConfig:
     """
-    新闻周报配置类
+    新闻汇总配置类
     
-    用于封装不同类型新闻周报的可配置参数，支持灵活扩展多种新闻类型。
+    用于封装不同类型新闻汇总的可配置参数，支持灵活扩展多种新闻类型。
     
     Attributes:
         name: 配置名称标识（如 "outdoor_sports", "tech_news"）
@@ -62,8 +62,8 @@ class NewsConfig:
         ai_prompt: AI分析prompt模板
         ai_system_prompt: AI系统prompt
         feishu_collaborator_openids: 飞书协作者openid列表
-        report_title_template: 周报标题模板，支持 {start_date} 和 {end_date} 占位符
-        report_header: 周报标题（Markdown格式）
+        report_title_template: 新闻汇总标题模板，支持 {start_date} 和 {end_date} 占位符
+        report_header: 新闻汇总标题（Markdown格式）
         cache_prefix: 缓存前缀，用于区分不同类型新闻的缓存
     """
     name: str
@@ -72,8 +72,8 @@ class NewsConfig:
     ai_prompt: str = ""
     ai_system_prompt: str = "你是一个专业的新闻分析助手，擅长批量提取文章关键信息并进行中英文翻译。"
     feishu_collaborator_openids: List[str] = field(default_factory=list)
-    report_title_template: str = "{name}周报 ({start_date} 至 {end_date})"
-    report_header: str = "# 新闻周报\n"
+    report_title_template: str = "{name}新闻汇总 ({start_date} 至 {end_date})"
+    report_header: str = "# 新闻汇总\n"
     cache_prefix: str = ""
 
 # 保存原始代理设置
@@ -993,7 +993,7 @@ def process_articles_with_ai(articles_list: List[Dict],
         batch_size: 每个批量处理的文章数量（建议3-5篇）
     
     Returns:
-        Markdown格式的周报文本
+        Markdown格式的新闻汇总文本
     """
     if not articles_list:
         return ''
@@ -1249,21 +1249,21 @@ def _process_batch_with_ai(client: OpenAI, batch: List[Dict], batch_index: int,
 
 def _generate_markdown(articles: List[Dict], config: NewsConfig = None) -> str:
     """
-    生成 Markdown 格式的周报内容
+    生成 Markdown 格式的新闻汇总内容
     
     Args:
         articles: 处理后的文章列表
         config: NewsConfig 配置对象（包含自定义标题等）
     
     Returns:
-        Markdown 格式的周报文本
+        Markdown 格式的新闻汇总文本
     """
     if not articles:
         return ''
     
     markdown_lines = []
     
-    report_header = config.report_header if config and config.report_header else '# 户外运动周报\n'
+    report_header = config.report_header if config and config.report_header else '# 户外运动新闻汇总\n'
     markdown_lines.append(report_header)
     markdown_lines.append(f'生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
     markdown_lines.append(f'共收录 {len(articles)} 篇文章\n')
@@ -1391,13 +1391,13 @@ def _parse_text_with_links(text):
 def publish_feishu_report(report_title, markdown_content, chat_id, 
                           collaborator_openids: List[str] = None):
     """
-    发布周报到飞书文档
+    发布新闻汇总到飞书文档
     
     核心功能: 创建文档 -> 写入内容 -> 发送卡片
     
     Args:
-        report_title: 周报标题
-        markdown_content: Markdown 格式的周报内容
+        report_title: 新闻汇总标题
+        markdown_content: Markdown 格式的新闻汇总内容
         chat_id: 飞书群组 ID
         collaborator_openids: 协作者 openid 列表（可选，优先于环境变量）
     
@@ -1566,26 +1566,26 @@ def publish_feishu_report(report_title, markdown_content, chat_id,
     card_content = {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": "🧗‍♂️ 户外资讯周报已生成"},
-            "template": "blue" # 标题背景色: blue, wathet, turquoise, green, yellow, orange, red, carmine, violet, purple, indigo, grey
+            "title": {"tag": "plain_text", "content": "🧗‍♂️ 户外资讯新闻汇总已生成"},
+            "template": "blue"
         },
         "elements": [
             {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"本周资讯已由 AI 整理完毕。\n**标题：** {report_title}\n**时间：** {os.getenv('TODAY', '本周')}"
+                    "content": f"本期资讯已由 AI 整理完毕。\n**标题：** {report_title}\n**时间：** {os.getenv('TODAY', '本期')}"
                 }
             },
             {
-                "tag": "hr" # 分割线
+                "tag": "hr"
             },
             {
                 "tag": "action",
                 "actions": [
                     {
                         "tag": "button",
-                        "text": {"tag": "plain_text", "content": "👉 点击阅读完整周报"},
+                        "text": {"tag": "plain_text", "content": "👉 点击阅读完整新闻汇总"},
                         "url": doc_url,
                         "type": "primary"
                     }

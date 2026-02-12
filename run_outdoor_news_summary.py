@@ -1,16 +1,16 @@
 """
-户外运动周报任务执行模块
+户外运动新闻汇总生成模块
 
-本模块是户外运动周报自动化系统的具体实现实例，负责协调文章抓取、AI分析和飞书发布的完整流程。
+本模块是户外运动新闻自动化系统的具体实现实例，负责协调文章抓取、AI分析和飞书发布的完整流程。
 
 核心功能:
-    1. run_weekly_outdoor_newsletter_task: 运行完整的户外运动周报生成和发布任务
+    1. run_outdoor_news_summary_task: 运行完整的户外运动新闻汇总生成和发布任务
 
 工作流程:
     RSS抓取(fetch_articles) → AI分析(process_articles_with_ai) → 飞书发布(publish_feishu_report)
 
 环境变量:
-    FEISHU_CHAT_ID: 飞书群组ID，用于推送周报消息
+    FEISHU_CHAT_ID: 飞书群组ID，用于推送消息
     FEISHU_APP_ID: 飞书应用ID
     FEISHU_APP_SECRET: 飞书应用密钥
     LLM_API_KEY: AI模型API密钥
@@ -33,6 +33,8 @@ from newsletter_tools import NewsConfig
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+DEFAULT_DAYS_BACK = 14
 
 
 def load_prompt_from_file(filename: str) -> str:
@@ -111,20 +113,20 @@ def get_outdoor_news_config() -> NewsConfig:
         ai_prompt=get_outdoor_ai_prompt(),
         ai_system_prompt=get_outdoor_ai_system_prompt(),
         feishu_collaborator_openids=feishu_openids,
-        report_title_template="户外运动周报 ({start_date} 至 {end_date})",
-        report_header="# 户外运动周报\n",
+        report_title_template="户外运动新闻汇总 ({start_date} 至 {end_date})",
+        report_header="# 户外运动新闻汇总\n",
         cache_prefix="outdoor_"
     )
 
 
-def run_weekly_outdoor_newsletter_task(
+def run_outdoor_news_summary_task(
     chat_id: str = None, 
     days_back: int = None,
     start_date: date = None,
     end_date: date = None
 ) -> Optional[str]:
     """
-    运行完整的户外运动周报生成和发布任务
+    运行完整的户外运动新闻汇总生成和发布任务
     
     支持两种模式：
     1. 按天数回溯：指定 days_back 参数，自动计算日期范围
@@ -153,7 +155,7 @@ def run_weekly_outdoor_newsletter_task(
     elif start_date is not None and end_date is not None:
         return run_newsletter_task(config, chat_id=chat_id, start_date=start_date, end_date=end_date)
     else:
-        return run_newsletter_task(config, chat_id=chat_id, days_back=7)
+        return run_newsletter_task(config, chat_id=chat_id, days_back=DEFAULT_DAYS_BACK)
 
 
 def parse_date(date_str: str) -> date:
@@ -180,22 +182,25 @@ def main():
     主函数：解析命令行参数并执行相应的任务
     
     支持两种运行模式：
-    1. 按天数回溯：python run_weekly_outdoor_newsletter.py --days 7
-    2. 指定日期范围：python run_weekly_outdoor_newsletter.py --start 2024-01-01 --end 2024-01-07
+    1. 按天数回溯：python run_outdoor_news_summary.py --days 14
+    2. 指定日期范围：python run_outdoor_news_summary.py --start 2024-01-01 --end 2024-01-14
     """
     parser = argparse.ArgumentParser(
-        description='户外运动周报生成和发布工具',
+        description='户外运动新闻汇总生成和发布工具',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  # 总结过去7天的新闻（默认）
-  python run_weekly_outdoor_newsletter.py
+  # 汇总过去14天的新闻（默认）
+  python run_outdoor_news_summary.py
   
-  # 总结过去3天的新闻
-  python run_weekly_outdoor_newsletter.py --days 3
+  # 汇总过去7天的新闻
+  python run_outdoor_news_summary.py --days 7
   
-  # 总结指定日期范围的新闻
-  python run_weekly_outdoor_newsletter.py --start 2024-01-01 --end 2024-01-07
+  # 汇总过去30天的新闻
+  python run_outdoor_news_summary.py --days 30
+  
+  # 汇总指定日期范围的新闻
+  python run_outdoor_news_summary.py --start 2024-01-01 --end 2024-01-14
         """
     )
     
@@ -203,7 +208,7 @@ def main():
         '--days',
         type=int,
         default=None,
-        help='回溯天数（默认: 7天）'
+        help=f'回溯天数（默认: {DEFAULT_DAYS_BACK}天）'
     )
     
     parser.add_argument(
@@ -231,11 +236,11 @@ def main():
     if args.start is not None and args.end is not None:
         if args.start > args.end:
             parser.error("开始日期不能晚于结束日期")
-        run_weekly_outdoor_newsletter_task(start_date=args.start, end_date=args.end)
+        run_outdoor_news_summary_task(start_date=args.start, end_date=args.end)
     elif args.days is not None:
-        run_weekly_outdoor_newsletter_task(days_back=args.days)
+        run_outdoor_news_summary_task(days_back=args.days)
     else:
-        run_weekly_outdoor_newsletter_task(days_back=7)
+        run_outdoor_news_summary_task(days_back=DEFAULT_DAYS_BACK)
 
 
 if __name__ == '__main__':
