@@ -48,8 +48,8 @@ services:
         set -e
         
         APP_DIR="/app/news_reporter"
-        GIT_REPO_SSH="git@github.com:wanxxxx/outdoor-sports-reporter.git"
-        GIT_REPO_HTTPS="https://github.com/wanxxxx/outdoor-sports-reporter.git"
+        GIT_REPO_SSH="git@github.com:wanxxxx/news-reporter.git"
+        GIT_REPO_HTTPS="https://github.com/wanxxxx/news-reporter.git"
         
         echo "=========================================="
         echo "🚀 News Reporter 容器启动脚本"
