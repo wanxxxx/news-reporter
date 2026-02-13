@@ -26,21 +26,12 @@ services:
       - .env
       
     volumes:
-      # 应用代码目录 - 持久化 Git 仓库
-      - news_reporter_data:/app/news_reporter
-      
-      # 输出目录 - 持久化生成的新闻汇总
-      - news_reporter_output:/app/news_reporter/output
-      
-      # 缓存目录 - 持久化 RSS 和 AI 缓存
-      - news_reporter_cache:/app/news_reporter/cache
-      
-      # 保存 openclaw 工作空间
-      - news_reporter_openclaw:/root/.openclaw/workspace
-      
       # SSH 密钥 - 从宿主机挂载（路径从环境变量 SSH_KEY_PATH 读取）
       # 注意：需要挂载私钥文件（不是 .pub 文件）
       - ${SSH_KEY_PATH}:/root/.ssh/id_ed25519:ro
+      
+      # 保存 openclaw 工作空间（可选，如果需要保持登录状态）
+      - news_reporter_openclaw:/root/.openclaw/workspace
       
     # 工作目录
     working_dir: /app
@@ -56,13 +47,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-# 命名卷 - 数据持久化
+# 命名卷 - 仅保留必要的
 volumes:
-  news_reporter_data:
-    name: news_reporter_data
-  news_reporter_output:
-    name: news_reporter_output
-  news_reporter_cache:
-    name: news_reporter_cache
   news_reporter_openclaw:
     name: news_reporter_openclaw
