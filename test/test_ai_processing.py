@@ -1,24 +1,16 @@
 import os
 import sys
 
-# 添加父目录到Python路径，以便导入newsletter_tools
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 1. 强制移除代理环境变量 (在 import requests/openai 之前执行)
-os.environ.pop(
-"HTTP_PROXY", None
-)
-os.environ.pop(
-"HTTPS_PROXY", None
-)
-os.environ.pop(
-"ALL_PROXY", None
-)
+os.environ.pop("HTTP_PROXY", None)
+os.environ.pop("HTTPS_PROXY", None)
+os.environ.pop("ALL_PROXY", None)
 
 import json
 from datetime import datetime
 from dotenv import load_dotenv
-from newsletter_tools import process_articles_with_ai
+from newsletter_tools import process_articles_with_ai, NewsConfig
 
 load_dotenv()
 
@@ -36,6 +28,27 @@ def clear_ai_cache():
         print("✅ AI缓存已清理")
     else:
         print("⚠️ AI缓存目录不存在")
+
+def get_test_config():
+    """获取测试用的 NewsConfig"""
+    prompts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'prompts')
+    
+    ai_prompt_path = os.path.join(prompts_dir, 'outdoor_ai_prompt.md')
+    with open(ai_prompt_path, 'r', encoding='utf-8') as f:
+        ai_prompt = f.read()
+    
+    ai_system_prompt_path = os.path.join(prompts_dir, 'outdoor_ai_system_prompt.md')
+    with open(ai_system_prompt_path, 'r', encoding='utf-8') as f:
+        ai_system_prompt = f.read()
+    
+    return NewsConfig(
+        name="test",
+        ai_prompt=ai_prompt,
+        ai_system_prompt=ai_system_prompt,
+        report_title_template="测试新闻汇总 ({start_date} 至 {end_date})",
+        report_header="# 测试新闻汇总\n",
+        cache_prefix="test_"
+    )
 
 def main():
     print("=" * 80)
@@ -63,18 +76,24 @@ def main():
         articles = json.load(f)
     print(f"成功读取 {len(articles)} 篇文章")
 
+    config = get_test_config()
+    print(f"✅ 加载配置完成")
+
     print("\n" + "-" * 80)
     print("开始 AI 处理...")
     print("-" * 80)
 
-    markdown_text = process_articles_with_ai(articles, batch_size=1)
+    markdown_text = process_articles_with_ai(articles, config=config, batch_size=1)
 
     print("\n" + "=" * 80)
     print("AI 处理完成！")
     print("=" * 80)
     print(f"\n生成 {len(articles)} 篇文章的摘要")
 
-    output_file = 'test/output/test_ai_processing_output.md'
+    output_dir = os.path.join('test', 'output')
+    os.makedirs(output_dir, exist_ok=True)
+    
+    output_file = os.path.join(output_dir, 'test_ai_processing_output.md')
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(markdown_text)
 
