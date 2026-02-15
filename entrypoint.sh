@@ -10,6 +10,13 @@ echo "=========================================="
 echo "🚀 News Reporter 容器启动脚本"
 echo "=========================================="
 
+# 同步时区为北京时间
+echo "🕐 配置时区为北京时间..."
+apt-get update -qq && apt-get install -y -qq tzdata > /dev/null 2>&1
+ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+echo "Asia/Shanghai" > /etc/timezone
+echo "✅ 时区配置完成: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+
 # 配置 SSH 密钥权限
 if [ -f "/tmp/host_ssh_key" ]; then
     echo "🔑 配置 SSH 密钥..."
@@ -67,6 +74,44 @@ python3 -m pip install --quiet --no-cache-dir --break-system-packages \
 
 echo "✅ 依赖安装完成"
 
-# 启动 openclaw gateway
+# 安装 cron（用于定时任务）
+if ! command -v cron &> /dev/null; then
+    echo "📦 安装 cron..."
+    apt-get install -y -qq cron > /dev/null
+fi
+
+# 配置定时任务
+echo "⏰ 配置定时任务..."
+cat > /tmp/crontab.txt << 'EOF'
+0 9 * * 1 cd /app/news_reporter && /usr/bin/python3 run_outdoor_news_summary.py --days 7 >> /var/log/news_reporter.log 2>&1
+EOF
+crontab /tmp/crontab.txt
+echo "✅ 定时任务配置完成: 每周一 09:00 运行户外运动新闻汇总"
+echo "📋 当前 crontab:"
+crontab -l
+
+# 启动 cron 服务
+echo "🕐 启动 cron 服务..."
+service cron start
+echo "✅ cron 服务已启动"
+
+# 启动 openclaw gateway（后台运行）
 echo "🚀 启动 openclaw gateway..."
-exec openclaw gateway --bind lan --verbose
+openclaw gateway --bind lan --verbose &
+
+# 等待 openclaw gateway 启动
+sleep 2
+
+# 检查 openclaw gateway 是否启动成功
+if pgrep -f "openclaw gateway" > /dev/null; then
+    echo "✅ openclaw gateway 启动成功"
+else
+    echo "⚠️ openclaw gateway 启动失败"
+fi
+
+echo "=========================================="
+echo "🎉 容器启动完成，可以执行任务"
+echo "=========================================="
+
+# 保持容器运行
+tail -f /dev/null

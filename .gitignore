@@ -28,5 +28,5 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-docker_container_openclaw_data/*
+news_reporter_openclaw
 .gitignore
